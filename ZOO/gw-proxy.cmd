@@ -1,9 +1,11 @@
 @echo off
 rem gw-proxy launcher: checks for Node.js, installs it if missing, then starts the proxy.
-rem Прокси пишет вывод в gw-proxy.log, а не в консоль: случайный клик мышью по окну
-rem (QuickEdit-выделение) больше НЕ замораживает процесс — node не пишет в консоль вовсе.
+rem Proxy output goes to gw-proxy.log, not to the console: an accidental click on the window
+rem (QuickEdit selection) no longer freezes the process - node never writes to console.
+rem NOTE: this file must stay pure ASCII. cmd.exe reads .cmd byte by byte in the current
+rem code page, so non-ASCII text together with "chcp 65001" breaks command parsing.
 setlocal
-rem UTF-8 для окна: кириллица в echo и хвосте лога без кракозябр (файл сохранён в UTF-8)
+rem UTF-8 console: safe here because the file itself is ASCII-only.
 chcp 65001 >nul
 cd /d "%~dp0"
 
@@ -19,10 +21,10 @@ if errorlevel 1 (
   echo [gw-proxy] Node.js installed. If "node" is not found, open a new console window and run this file again.
 )
 
-echo [gw-proxy] Запуск... Лог: %~dp0gw-proxy.log
-echo [gw-proxy] Окно можно свернуть. Останов: Ctrl+C здесь или закрыть окно.
+echo [gw-proxy] Starting... Log: %~dp0gw-proxy.log
+echo [gw-proxy] You can minimize this window. Stop: Ctrl+C here or close the window.
 node gw-proxy.mjs %* >> gw-proxy.log 2>&1
 
-echo [gw-proxy] Прокси остановлен. Последние строки лога:
-powershell -NoProfile -Command "Get-Content -Path '%~dp0gw-proxy.log' -Tail 15 -Encoding UTF8"
+echo [gw-proxy] Proxy stopped. Last log lines:
+powershell -NoProfile -Command "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Content -Path '%~dp0gw-proxy.log' -Tail 15 -Encoding UTF8"
 pause
