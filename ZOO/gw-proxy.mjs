@@ -14,7 +14,10 @@ const SCRIPT_PATH = fileURLToPath(import.meta.url);
 
 const GW_BASE = 'https://code.accelstacks.com';
 const CRED_PATH = process.env.LOCALAPPDATA + '\\OpenCoder\\cc-web-credentials.json';
-const CLI_PATH = 'C:\\OpenCoder\\cli.js';
+// Каталог установки OpenCoder. По умолчанию C:\OpenCoder; если OpenCoder стоит в другом
+// месте — задайте OPENCODER_HOME (проще всего строкой set в gw-proxy.cmd).
+const OPENCODER_HOME = (process.env.OPENCODER_HOME || '').trim().replace(/[\\/]+$/, '') || 'C:\\OpenCoder';
+const CLI_PATH = path.join(OPENCODER_HOME, 'cli.js');
 const PORT = Number(process.env.GW_PROXY_PORT || 8787);
 // Сколько ждать заголовков от шлюза. Стриминг ответа после заголовков не ограничен.
 const UPSTREAM_TIMEOUT_MS = Number(process.env.GW_PROXY_TIMEOUT_MS || 60000);
@@ -67,9 +70,16 @@ console.warn = (...a) => emit(process.stderr, a);
 console.error = (...a) => emit(process.stderr, a);
 
 let BUILD_SHA = '';
+let CLI_FOUND = false;
 try {
   BUILD_SHA = createHash('sha256').update(readFileSync(CLI_PATH)).digest('hex');
-} catch {} // cli.js не найден — допустимо, шлюз принимает пустой x-ccw-build
+  CLI_FOUND = true;
+} catch {
+  // Допустимо: шлюз принимает пустой x-ccw-build. Но путь стоит проверить —
+  // если OpenCoder установлен в другой каталог, задайте OPENCODER_HOME.
+  console.warn(warn(`cli.js OpenCoder не найден: ${CLI_PATH} (x-ccw-build будет пустым)`));
+  console.warn(info('→ Если OpenCoder установлен в другом каталоге — задайте OPENCODER_HOME.'));
+}
 const creds = () =>
   JSON.parse(readFileSync(CRED_PATH, 'utf8')).credentials['https://code.accelstacks.com/gw'];
 
@@ -300,6 +310,7 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log('\n=== gw-proxy: запущен ===');
   console.log(info(`Адрес для Roo / клиентов: ${BASE_URL}`));
   console.log(info(`Отладка: debug=${DEBUG} (0 — без логов, 1 — ошибки, 2 — все запросы)`));
+  console.log(info(`OpenCoder: ${OPENCODER_HOME} (cli.js ${CLI_FOUND ? 'найден' : 'НЕ найден'})`));
   if (DEBUG >= 2 && process.env.NODE_DEBUG)
     console.log(info(`NODE_DEBUG=${process.env.NODE_DEBUG} — в лог пойдёт и трассировка ядра Node`));
   console.log(info(`Модели: ${PROFILES.map((p) => `${p.name} = ${p.model}`).join(' | ')}`));

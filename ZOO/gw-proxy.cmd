@@ -21,7 +21,11 @@ if errorlevel 1 (
   echo [gw-proxy] Node.js installed. If "node" is not found, open a new console window and run this file again.
 )
 
+rem OpenCoder install folder. Change this single line if OpenCoder is installed elsewhere.
+set "OPENCODER_HOME=C:\OpenCoder"
+
 echo [gw-proxy] Starting... Log: %~dp0gw-proxy.log
+echo [gw-proxy] OpenCoder home: %OPENCODER_HOME%
 echo [gw-proxy] Live output below is duplicated to the log file. Stop: Ctrl+C here or close the window.
 node gw-proxy.mjs %*
 

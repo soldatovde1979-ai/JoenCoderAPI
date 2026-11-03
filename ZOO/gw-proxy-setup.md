@@ -19,6 +19,31 @@ Roo Code  ──http://127.0.0.1:8787/v1──>  gw-proxy.mjs  ──подпи�
 Папка с файлами значения не имеет: все пути внутри относительные
 (сейчас это `c:\Projects\OpenCoderAPI\ZOO`, но папку можно перемещать).
 
+### Если OpenCoder установлен в другом каталоге
+
+Прокси ищет установку OpenCoder в `C:\OpenCoder` (нужен только файл `cli.js` —
+из него считается отпечаток сборки `x-ccw-build`). Другой путь задаётся одной
+строкой в `gw-proxy.cmd`:
+
+```bat
+rem OpenCoder install folder. Change this single line if OpenCoder is installed elsewhere.
+set "OPENCODER_HOME=D:\Tools\OpenCoder"
+```
+
+Либо переменной окружения `OPENCODER_HOME` (тогда `gw-proxy.cmd` можно не править).
+Фактический путь видно в выводе при старте:
+
+```
+     OpenCoder: C:\OpenCoder (cli.js найден)
+```
+
+Если файл не найден, прокси напишет предупреждение и продолжит работу
+с пустым `x-ccw-build` — шлюз такой запрос принимает, но отпечаток сборки
+будет отсутствовать.
+
+Креденшалы (`cc-web-credentials.json`) от каталога установки **не зависят**:
+они всегда лежат в `%LOCALAPPDATA%\OpenCoder\` профиля пользователя.
+
 ## Настройка (3 шага)
 
 **1. Запустите `gw-proxy.cmd` двойным кликом** (или `node gw-proxy.mjs` из терминала).
