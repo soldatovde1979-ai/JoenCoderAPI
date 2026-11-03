@@ -18,11 +18,12 @@ const CLI_PATH = 'C:\\OpenCoder\\cli.js';
 const PORT = Number(process.env.GW_PROXY_PORT || 8787);
 // Сколько ждать заголовков от шлюза. Стриминг ответа после заголовков не ограничен.
 const UPSTREAM_TIMEOUT_MS = Number(process.env.GW_PROXY_TIMEOUT_MS || 60000);
-// debug=: 0 — без логов запросов, 1 — только ошибки, 2 — все запросы.
+// debug=: 0 — без логов запросов, 1 — только ошибки (по умолчанию), 2 — все запросы.
 // Задаётся аргументом (node gw-proxy.mjs debug=2) или переменной GW_PROXY_DEBUG.
 const DEBUG = (() => {
   const a = process.argv.find((x) => /^debug=[0-2]$/.test(x));
-  return Number(a ? a.slice(6) : process.env.GW_PROXY_DEBUG) || 0;
+  const v = (a ? a.slice(6) : process.env.GW_PROXY_DEBUG || '').trim();
+  return v === '' ? 1 : Number(v) || 0;
 })();
 const BASE_URL = `http://127.0.0.1:${PORT}/v1`;
 const PROFILES = [
