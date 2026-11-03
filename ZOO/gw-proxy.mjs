@@ -46,9 +46,9 @@ const ts = () => {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
-// Живая консоль (Windows Terminal): прокси сам ведёт gw-proxy.log — при старте
-// сокращаем его до последних 200 строк и дописываем новый вывод без ANSI-кодов.
-if (process.stdout.isTTY && existsSync(LOG_PATH)) {
+// Лог ведёт сам прокси, независимо от способа запуска: при старте сокращаем
+// gw-proxy.log до последних 200 строк, дальше пишем туда же и дублируем в консоль.
+if (existsSync(LOG_PATH)) {
   try {
     const tail = readFileSync(LOG_PATH, 'utf8').split(/\r?\n/).filter(Boolean).slice(-200);
     if (tail.length) writeFileSync(LOG_PATH, tail.join('\n') + '\n');
@@ -57,13 +57,9 @@ if (process.stdout.isTTY && existsSync(LOG_PATH)) {
 function emit(stream, args) {
   const stamp = `[${ts()}] `;
   const msg = format(...args);
-  if (process.stdout.isTTY) {
-    stream.write(stamp + msg + '\n'); // в консоль — как есть, с цветом
-    try { appendFileSync(LOG_PATH, stamp + msg.replace(ANSI_RE, '') + '\n'); } catch {}
-  } else {
-    // Вывод перенаправлен в файл (gw-proxy.cmd) — пишем чистый текст с меткой времени
-    stream.write(stamp + msg.replace(ANSI_RE, '') + '\n');
-  }
+  stream.write(stamp + msg + '\n'); // в консоль — как есть, с цветом
+  try { appendFileSync(LOG_PATH, stamp + msg.replace(ANSI_RE, '') + '\n'); } catch {}
+  // в файл — чистый текст без ANSI-кодов (они и выглядели «кракозябрами»)
 }
 console.log = (...a) => emit(process.stdout, a);
 console.warn = (...a) => emit(process.stderr, a);

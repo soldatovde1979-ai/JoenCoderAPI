@@ -1,7 +1,7 @@
 @echo off
 rem gw-proxy launcher: checks for Node.js, installs it if missing, then starts the proxy.
-rem Proxy output goes to gw-proxy.log, not to the console: an accidental click on the window
-rem (QuickEdit selection) no longer freezes the process - node never writes to console.
+rem Proxy logs both to this window and to gw-proxy.log (the proxy writes the file itself,
+rem trimmed to the last 200 lines on start). No redirect here: output stays live.
 rem NOTE: this file must stay pure ASCII. cmd.exe reads .cmd byte by byte in the current
 rem code page, so non-ASCII text together with "chcp 65001" breaks command parsing.
 setlocal
@@ -22,9 +22,8 @@ if errorlevel 1 (
 )
 
 echo [gw-proxy] Starting... Log: %~dp0gw-proxy.log
-echo [gw-proxy] You can minimize this window. Stop: Ctrl+C here or close the window.
-node gw-proxy.mjs %* >> gw-proxy.log 2>&1
+echo [gw-proxy] Live output below is duplicated to the log file. Stop: Ctrl+C here or close the window.
+node gw-proxy.mjs %*
 
-echo [gw-proxy] Proxy stopped. Last log lines:
-powershell -NoProfile -Command "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Content -Path '%~dp0gw-proxy.log' -Tail 15 -Encoding UTF8"
+echo [gw-proxy] Proxy stopped.
 pause
