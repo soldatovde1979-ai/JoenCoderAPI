@@ -1,3 +1,4 @@
 # Локальные артефакты — в репозиторий не попадают
 gw-proxy.log
+gw-proxy.prev.log
 .opencoder/

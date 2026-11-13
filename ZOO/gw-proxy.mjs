@@ -2,7 +2,7 @@
 // Roo Code -> http://127.0.0.1:8787/v1 (любой Bearer-ключ) -> переподпись -> https://code.accelstacks.com/gw/v1
 // Запуск: node gw-proxy.mjs  (или gw-proxy.cmd — проверит окружение и при необходимости поставит Node)
 import { createHash, createPrivateKey, sign, randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
+import { readFileSync, appendFileSync, existsSync, renameSync, statSync } from 'node:fs';
 import http from 'node:http';
 import { Readable } from 'node:stream';
 import { execSync, spawnSync } from 'node:child_process';
@@ -44,19 +44,21 @@ const info = (s) => `     ${s}`;
 /* ================= Лог: метка времени, чистый текст в файле, живой режим в консоли ================= */
 
 const LOG_PATH = path.join(path.dirname(SCRIPT_PATH), 'gw-proxy.log');
+const LOG_PREV_PATH = path.join(path.dirname(SCRIPT_PATH), 'gw-proxy.prev.log');
+const LOG_MAX_BYTES = 1024 * 1024; // 1 МБ: больший лог при старте уходит в gw-proxy.prev.log
 const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]/g; // ANSI-коды цвета — они и выглядят «кракозябрами» в cmd
 const ts = () => {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 };
-// Лог ведёт сам прокси, независимо от способа запуска: при старте сокращаем
-// gw-proxy.log до последних 200 строк, дальше пишем туда же и дублируем в консоль.
+// Лог ведёт сам прокси, независимо от способа запуска. Раньше он обрезался до последних
+// 200 строк при каждом старте — следы сбоя терялись. Теперь лог переименовывается
+// в gw-proxy.prev.log только когда превысил 1 МБ, поэтому причина ошибки переживает рестарт.
 if (existsSync(LOG_PATH)) {
   try {
-    const tail = readFileSync(LOG_PATH, 'utf8').split(/\r?\n/).filter(Boolean).slice(-200);
-    if (tail.length) writeFileSync(LOG_PATH, tail.join('\n') + '\n');
-  } catch {} // лог не читается/не пишется — не критично, продолжаем
+    if (statSync(LOG_PATH).size > LOG_MAX_BYTES) renameSync(LOG_PATH, LOG_PREV_PATH);
+  } catch {} // лог не читается/не переименовывается — не критично, продолжаем
 }
 function emit(stream, args) {
   const stamp = `[${ts()}] `;
@@ -249,6 +251,14 @@ const server = http.createServer(async (req, res) => {
   inFlight++;
   const startLine = `[start] #${inFlight} ${req.method} ${req.url}`;
   if (DEBUG >= 2) console.log(startLine + (inFlight > 1 ? ` (параллельно: ${inFlight})` : ''));
+  // Итог запроса считаем по фактическому закрытию ответа: у стрима это видно только здесь —
+  // по этой строке определяется реальная длительность и обрыв со стороны клиента.
+  res.on('close', () => {
+    inFlight = Math.max(0, inFlight - 1);
+    if (DEBUG >= 2) console.log(`[done] ${req.method} ${req.url} (${Date.now() - started} ms, осталось в полёте: ${inFlight})`);
+    if (res.headersSent && !res.writableFinished)
+      console.error(`[err] клиент прервал ответ: ${req.method} ${req.url} (${Date.now() - started} ms)`);
+  });
   try {
     const body = await readBody(req);
     const upstreamUrl = GW_BASE + '/gw' + req.url; // /v1/... -> /gw/v1/...
@@ -278,24 +288,74 @@ const server = http.createServer(async (req, res) => {
 
     const waitedMs = Date.now() - started; // сколько шлюз думал до первых байтов (заголовков)
     const statusLine = `${method} ${req.url} -> ${upstream.status} (шлюз ${waitedMs} ms, всего ${Date.now() - started} ms)`;
-    if (DEBUG >= 1 && upstream.status >= 400) console.error('[err] ' + statusLine);
-    else if (DEBUG >= 2) console.log('[req] ' + statusLine);
+    const contentType = upstream.headers.get('content-type') || 'application/json';
+    const headers = { 'content-type': contentType };
+    if (upstream.headers.get('cache-control')) headers['cache-control'] = upstream.headers.get('cache-control');
     // Долгое ожидание заголовков от шлюза — типичная причина «зависания» у агента.
     // Пишем всегда (независимо от DEBUG), чтобы это было видно в обычном логе.
     if (waitedMs > 10000) console.warn(`[долго] шлюз отдал заголовки за ${Math.round(waitedMs / 1000)} с: ${method} ${req.url}`);
-    const headers = { 'content-type': upstream.headers.get('content-type') || 'application/json' };
-    if (upstream.headers.get('cache-control')) headers['cache-control'] = upstream.headers.get('cache-control');
+
+    // Ошибка шлюза: читаем тело целиком, чтобы причина была в логе, клиенту уходят те же байты.
+    if (upstream.status >= 400) {
+      const text = upstream.body ? await upstream.text() : '';
+      if (DEBUG >= 1) console.error(`[err] ${statusLine}${text ? ` тело: ${text.slice(0, 800)}` : ' (пустое тело)'}`);
+      res.writeHead(upstream.status, headers);
+      res.end(text);
+      return;
+    }
+    if (DEBUG >= 2) console.log('[req] ' + statusLine);
+
+    // 200 без SSE на stream-запросе — шлюз вернул JSON внутри успешного ответа;
+    // клиент рисует это как «Internal server error», поэтому тело пишем в лог.
+    const wantsStream = body.length > 0 && /"stream"\s*:\s*true/.test(body.toString('utf8'));
+    // Сравнение по префиксу: шлюз отдаёт «text/event-stream; charset=utf-8», и строгое !==
+    // ложно срабатывало на нормальном SSE, буферизуя стрим целиком.
+    if (wantsStream && method === 'POST' && req.url.includes('/chat/completions') && !contentType.startsWith('text/event-stream')) {
+      const text = upstream.body ? await upstream.text() : '';
+      console.warn(`[warn] не-stream ответ (${contentType}): ${statusLine} тело: ${text.slice(0, 300)}`);
+      res.writeHead(upstream.status, headers);
+      res.end(text);
+      return;
+    }
+
     res.writeHead(upstream.status, headers);
-    if (upstream.body) Readable.fromWeb(upstream.body).pipe(res);
-    else res.end();
+    if (upstream.body) {
+      const src = Readable.fromWeb(upstream.body);
+      // Обрыв на стороне шлюза: клиенту передать уже нечего, но причину фиксируем в логе.
+      src.on('error', (e) => {
+        console.error(`[err] stream: ${method} ${req.url} (${Date.now() - started} ms): ${e}`);
+        res.destroy();
+      });
+      src.pipe(res);
+    } else {
+      res.end();
+    }
   } catch (e) {
     if (DEBUG >= 1) console.error(`[err] ${req.method} ${req.url} -> 502: ${e}`);
+    if (res.headersSent) {
+      res.destroy(); // заголовки уже ушли — 502 отправить нельзя, иначе ERR_HTTP_HEADERS_SENT
+      return;
+    }
     res.writeHead(502, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: { message: String(e), type: 'proxy_error' } }));
-  } finally {
-    inFlight = Math.max(0, inFlight - 1);
-    if (DEBUG >= 2) console.log(`[done] ${req.method} ${req.url} (${Date.now() - started} ms, осталось в полёте: ${inFlight})`);
   }
+});
+
+// Падение процесса и ошибки самого сервера раньше не попадали в лог: прокси молча умирал
+// (или молча не стартовал из-за занятого порта), а в окне оставалось только «Proxy stopped».
+process.on('uncaughtException', (e) => {
+  console.error('[fatal] необработанное исключение: ' + (e?.stack || e));
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error('[fatal] необработанный rejection: ' + (e?.stack || e));
+  process.exit(1);
+});
+server.on('error', (e) => {
+  console.error(`[fatal] сервер не поднялся на 127.0.0.1:${PORT}: ${e}`);
+  if (e && e.code === 'EADDRINUSE')
+    console.warn(info(`→ Порт занят (возможно, уже запущен второй экземпляр). Другой порт: set GW_PROXY_PORT=8788`));
+  process.exit(1);
 });
 
 /* ================= Запуск ================= */
